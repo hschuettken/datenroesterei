@@ -1,8 +1,11 @@
-# SAP Field Notes
+# Datenrösterei
 
 Notes and tools from productive SAP data-platform work — **SAP Datasphere**, **SAP Analytics
 Cloud planning**, and **ABAP** — published because the things that cost the most time are rarely
 the things that are documented.
+
+*Rösterei — a roastery. Raw beans are not a drink and raw tables are not a model; both need
+someone to apply heat carefully and know when to stop.*
 
 The common thread across everything here is **silent failure**: the API call that returns HTTP 200
 and does nothing, the data action that completes successfully and writes nothing, the export that

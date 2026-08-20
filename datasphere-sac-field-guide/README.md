@@ -1,6 +1,6 @@
 # SAP Datasphere & SAP Analytics Cloud — Field Guide
 
-*Part of [SAP Field Notes](../README.md).*
+*Part of [Datenrösterei](../README.md).*
 
 A working reference for building and operating **SAP Datasphere** and **SAP Analytics Cloud
 planning** — the parts that are hard to find in the official documentation because they only
