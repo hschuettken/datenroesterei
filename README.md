@@ -16,6 +16,10 @@ documentation is quietest about.
 Written and maintained by Henning Schuettken. Not affiliated with or endorsed by SAP.
 Corrections and additions are welcome — open an issue or a pull request.
 
+The reasoning behind these documents — why the silent-failure class matters more than the loud
+one, and what each mechanism cost to find — is written up at **[Layer 8](https://layer8.schuettken.net)**.
+This repository is the evidence; that is the argument.
+
 ---
 
 ## What is here
@@ -35,7 +39,9 @@ back, the access files are opened when a specific question comes up.
 | `SAC_SCRIPTING.md` | the scripting language and its limits, the API catalogue, filters, hierarchy format, master-data CRUD, the planning API, utility classes |
 | `SEAMLESS_PLANNING.md` | SAC planning persisted in Datasphere: the inverted architecture, prerequisites, the restrictions that decide feasibility, sizing |
 
-Start with [the guide's own README](datasphere-sac-field-guide/README.md).
+Start with [the guide's own README](datasphere-sac-field-guide/README.md). Two walkthroughs of the
+material: [Five ways SAP Datasphere tells you everything is fine](https://layer8.schuettken.net/datasphere-silent-failures/)
+and [The data action ran green and wrote nothing](https://layer8.schuettken.net/sac-planning-writes-nothing/).
 
 ### [`abap-table-export/`](abap-table-export/) — `ZTABLE_EXPORT_CSV`
 
@@ -49,6 +55,9 @@ server. Built for tables in the billion-row class (ACDOCA and similar):
   at 800 million rows continues where it stopped instead of starting over
 - locale-independent numerics, configurable delimiter, enclosure and encoding
 - runs on ABAP 7.02+ (NetWeaver 7.0 EHP2 and later)
+
+The three design decisions behind it are written up in
+[Exporting billion-row tables from ABAP](https://layer8.schuettken.net/exporting-billion-row-tables-from-abap/).
 
 ---
 
