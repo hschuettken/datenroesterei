@@ -59,6 +59,17 @@ server. Built for tables in the billion-row class (ACDOCA and similar):
 The three design decisions behind it are written up in
 [Exporting billion-row tables from ABAP](https://layer8.schuettken.net/exporting-billion-row-tables-from-abap/).
 
+### [`sac-hierarchy-api/`](sac-hierarchy-api/) — hierarchies without the Modeler
+
+A field guide plus Python script for creating, removing and **filling** parent-child
+hierarchies on SAC dimensions via the internal FPA REST layer — browser session only, no
+OAuth client. The README is written to be self-contained for an LLM agent: auth handshake,
+payload shapes, the read-modify-write discipline (there is no patch API), and the
+constraints that decide the design — above all the **cross-hierarchy leaf rule**, under
+which a member that is a parent in *any* parent-child hierarchy can no longer carry fact
+data. Unsupported API, clearly marked as such; the supported alternatives are listed
+alongside.
+
 ---
 
 ## A note on what these documents are
@@ -76,6 +87,7 @@ customer-specific information anywhere in this repository.
 
 - **Documentation** — [CC BY 4.0](LICENSE): reuse and adapt freely, with attribution.
 - **ABAP source** — [MIT](abap-table-export/LICENSE).
+- **Python source** — [MIT](sac-hierarchy-api/LICENSE).
 
 SAP, SAP Datasphere, SAP Analytics Cloud, SAP NetWeaver and ABAP are trademarks of SAP SE. This is
 independent work with no affiliation to or endorsement by SAP.
