@@ -11,10 +11,11 @@ the failure modes that look like success — is in this one file.
 
 > **Status and caveats.** The FPA layer is *internal, undocumented, unsupported* API — the
 > same calls the SAC web UI makes. It can change with any quarterly release. Everything below
-> was field-verified in productive work (2026-07); re-verify against your release. For a
-> supported, recurring integration use the official **Data Import Service**
-> (`/api/v1/dataimport/…`, OAuth client required) instead; the FPA route shines for one-off
-> structural work where standing up an OAuth client isn't worth it.
+> was field-verified in productive work (2026-07); re-verify against your release. And know
+> what the supported alternative can and cannot do: the official **Data Import Service**
+> (`/api/v1/dataimport/…`, OAuth client required) covers recurring fact and master-data loads,
+> but **hierarchy content is not part of its documented API** (see §7) — for hierarchy trees,
+> the routes are the UI import or this FPA layer.
 
 ---
 
@@ -222,7 +223,7 @@ async load lands.
 |---|---|---|
 | Modeler UI | ✅ | one-off manual work |
 | Master-data import wizard (parent column in mapping) | ✅ | tree content, manual |
-| **Data Import Service** `/api/v1/dataimport` (OAuth client) | ✅ | recurring automated loads of master data incl. parent pointers |
+| **Data Import Service** `/api/v1/dataimport` (OAuth client) | ✅ | recurring automated loads of fact data and master-data **attributes** — but **no hierarchy import**: parent-child trees are absent from the documented API and its changelog (the export side has `…MasterWithHierarchy`; import has no counterpart) |
 | Internal FPA API (this document) | ❌ unsupported | scripted structural work, one-offs, migrations |
 | Story scripting (Analytics Designer) | ✅ but can only *switch* the displayed hierarchy (`setHierarchy`) | never for creating/changing |
 | Live models (Datasphere/BW/HANA/S4) | — | hierarchies are **not editable in SAC at all**; change them in the source |

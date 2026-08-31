@@ -63,7 +63,7 @@ Datasphere side).
 
 | API | Base path | What it does |
 |---|---|---|
-| **Data Import Service** | `/api/v1/dataimport/…` | push **fact data and master data**, including hierarchy content, into existing structures; jobs + validation |
+| **Data Import Service** | `/api/v1/dataimport/…` | push **fact data and master data** (attribute columns) into existing structures; jobs + validation. **No hierarchy import**: parent-child trees are not part of the documented API — note the asymmetry with the export side, which does have `…MasterWithHierarchy` |
 | **Data Export Service** | `/api/v1/dataexport/…` | read model data and metadata as OData (§3) |
 | **Content Network API** | `/api/v1/content/…` | export/import content packages — **the one supported way to move a changed model definition**, whole-object rather than delta |
 | **SCIM** | `/api/v1/scim` (legacy), `/api/v1/scim2` (Cloud Foundry tenants only), `/api/v1/scim3` | users and teams CRUD; transport users/teams between tenants. **Three endpoint generations with different base paths** — pick deliberately; `/api/v1/scim` is the oldest, not the current one |
