@@ -145,7 +145,10 @@ rs["<Account>"].formattedValue;                             // the displayed cel
 
 ```js
 var member = { id: productId, description: description,
-               properties: { Weight: weight, ManuallyCreated: manuallyCreated } };
+               properties: { Weight: weight, ManuallyCreated: manuallyCreated },
+               // parent-child hierarchy assignment is part of the member payload:
+               hierarchies: { "<HierarchyId>": { parentId: "<parentKey>",
+                                                 previousSiblingId: "<siblingKey>" } } };
 
 var ok = PlanningModel_1.createMembers("<Dimension>", member);   // updateMembers / deleteMembers
 if (ok === true) {
@@ -159,6 +162,16 @@ if (ok === true) {
 `deleteMembers` takes an array of **bare keys** — selections must go through the hierarchy strip
 (§4) first. Numeric-looking attributes are frequently `NVARCHAR`, so validate with
 `ConvertUtils.stringToNumber(x).toString() === "NaN"` before writing.
+
+**The `hierarchies` field closes the Data Import Service gap.** The DIS cannot import
+hierarchy content (see `SAC_APIS.md` §2) — but it *can* load a parent key into an ordinary
+temp attribute. A script can then finish the job: `getMembers` (mind the limit), read
+`properties["<TempParentAttr>"]`, and `updateMembers` with
+`hierarchies: {"<HierarchyId>": {parentId: …}}`. Requirements: the hierarchy definition must
+already exist on the dimension (neither DIS nor this API creates one), the model must be a
+planning model, the user needs member-maintenance rights, and scripts only run on user
+interaction — so the copy step is a button/`onInitialization` in an admin story, not a
+scheduler. Chunk large dimensions; a scripted loop is far slower than a native import.
 
 ⚠️ **Popup buffers must be reset by the caller.** The standard create/update popup pattern keeps
 the field values in global variables and fills the inputs in `onOpen`. If the "create" entry point
