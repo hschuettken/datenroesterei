@@ -5,9 +5,10 @@
 > Field notes from productive SAP Datasphere / SAP Analytics Cloud work.
 > No customer-specific information.
 
-**Contents** — §1 OAuth, CLI, consumption APIs, Open SQL Schema, writing data ·
-§2 design-time & monitoring APIs · §3 transport & content packages ·
-§4 Datasphere ↔ SAC · §5 browser-driven automation
+**Contents** — §1 OAuth, CLI (incl. SQL views, analytic models, Open-SQL tables, folders),
+consumption APIs, Open SQL Schema, writing data, orchestration ·
+§2 design-time & monitoring APIs, reading data the Data Viewer's way, operating a bulk deploy ·
+§3 transport & content packages · §4 Datasphere ↔ SAC · §5 browser-driven automation
 
 ## 1. Programmatic Access — OAuth, CLI and the API planes
 
@@ -96,6 +97,19 @@ wrong client purpose.
   integration rather than discovering it from a business user.
 - One documented functional limit: a Technical User driving the CLI **cannot start task chains
   that contain BW bridge process chains**.
+
+**Technical User — three things that cost a demo day** (all measured on one tenant, three
+client creations before the consumption API answered 200):
+
+- The technical user **does not appear under Security → Users**. It exists only as the
+  client's identity; roles are assigned **at the client**, in the App Integration dialog.
+- **Global roles give no space data** — not even *DW Administrator*. Only a **scoped role**
+  assigned at the client opens the consumption API for that space. (A scope prompt may not
+  appear; the assignment works anyway.)
+- Diagnose a 403 by **decoding the JWT first**: an API-Access token carries `apiaccess` and an
+  SAC user scope but **no `user_name` claim** — that is the signature of "wrong purpose", and no
+  amount of extra scopes changes it. A client created with grant *SAML 2.0 Bearer* answers
+  `Unauthorized grant type` to `client_credentials`; it needs an assertion, not a secret.
 
 **PKCE varies per client.** Some registered clients require `code_challenge` /
 `code_challenge_method=S256` in the authorize call plus the matching `code_verifier` in the
@@ -213,6 +227,100 @@ elements.<key columns>                : "key": true, "notNull": true
 **What the CLI does NOT do: ad-hoc SQL.** There is no `datasphere query`. Data access is the job
 of the consumption APIs (§1.3) or the Open SQL Schema (§1.4).
 
+#### SQL views through the CLI — the empty-shell trap
+
+⚠️ `datasphere objects views create` with **only the SQL text** in the CSN creates an **empty
+shell**: it reports `Saved and deployed`, builds no `query` tree, and the view returns **0 rows,
+forever**, with no error anywhere. A SQL view needs `query` (the CQN tree) **and** `elements`
+(the typed column list) in the CSN — exactly what the SQL editor produces before it saves. The
+editor does it in three calls, all on the browser session (§2):
+
+| # | Call | Role |
+|---|---|---|
+| 1 | `POST /dwaas-core/cdssql/buildcqn` `{"sql": "…"}` → `{status, sql, csn}` | the SQL→CQN compiler; `csn` is the bare `{SELECT:…}` / `{SET:…}` tree |
+| 2 | `POST /dwaas-core/metamodel/<folderGuid>/validate-csn` | validation only, skippable |
+| 3 | `POST /dwaas-core/deploy/<SPACE>/base` `{folderId, folderGuid, spaceName, name, content:{definitions:{…}}}` | **saves and deploys**, and returns real compiler errors |
+
+`folderGuid` is mandatory on call 3, is **always the space's GUID** (never a folder's — a folder
+GUID there yields `403 User must have DWC_DATABUILDER authorization privilege`, which reads like
+a missing right and is only the wrong value), and no API returns it: read it once off the
+`validate-csn` URL in the browser's network log and cache it. The public CLI endpoint
+(`/api/v1/spaces/<S>/views?deploy=true`) saves correctly but answers only `Failed to deploy` on
+UNION views, which is why call 3 is the one to script.
+
+**Do not derive `elements` yourself — let HANA describe the query.** A deployed view with
+`@DataWarehouse.consumption.external: true` is readable from the Open SQL Schema (§1.4): create a
+throw-away view, read `SYS.VIEW_COLUMNS`, drop it. Deploy a chain bottom-up and each stage can
+describe itself against the previous one. Mind the scale trap when you do
+(`DSP_KNOWLEDGE.md` §4.18: `SCALE` is `NULL` for computed decimals — never map it to 0).
+
+#### Analytic models through the CLI
+
+`datasphere objects analytic-models create -F <csn>.json` works, and the CSN needs **both
+halves**: `definitions.<AM>` (`ANALYTICAL_CUBE` plus a query on the fact) and
+`businessLayerDefinitions.<AM>` (`factSources`, `attributes`, `measures`). Reverse-engineer the
+shape from an existing model (`objects analytic-models read`). The traps, in the order they were
+hit:
+
+1. **Elements must not carry a `type`** — only `@EndUserText.label` (plus `measureType` on
+   measures). With a `type`, `create` fails and DSP reports a **misleading
+   `409 ObjectAlreadyExists`**, even for a freshly invented name. The same 409 appears when
+   association elements (`cds.Association`) are copied into the model — skip them.
+2. **`update` works — but only with `--technical-name`.** Without the flag it looks broken, which
+   is how a "delete + create" habit starts. That habit is **expensive**: delete + create gives
+   the model a **new object id, and every story bound to it loses its binding** — the crosstab
+   then shows axis headers and nothing else, with no error. Rule: model exists → `update
+   --technical-name`, otherwise `create`.
+3. The view underneath must be `ANALYTICAL_FACT`, not `DATA_STRUCTURE`, with element annotations
+   (`@Analytics.dimension`, `@Semantics.currencyCode` / `.unitOfMeasure`,
+   `@AnalyticsDetails.measureType` + `@Aggregation.default` + `@Semantics.amount.currencyCode`).
+   **Numeric non-measures** (sort orders, indent levels) must be marked as dimensions
+   explicitly, or they become summable measures in SAC.
+4. Four more that **the deploy survives without complaint** — visible only in the UI, never as
+   an error: measures need `measureMapping`, not `sourceKey`/`key` (otherwise the model **no
+   longer opens in the modeler** — blank canvas, no message); a dimension source needs a
+   duplicated, hidden key attribute with `usedForDimensionSourceKey`; a calculated measure needs
+   its formula **twice** (flat `xpr` **and** `formulaRaw`/`formula`/`elements`); a multi-part
+   dimension needs a `representativeKey`.
+5. **`update` does not deploy when nothing changed in content** — return code 0, empty output,
+   "Deployed On" unchanged. After a dimension change, press Deploy in the UI.
+6. **Compound dimensions** (multi-column `on` conditions) require **every left-hand column to
+   carry the same name in the target** (`MISSING_DEPENDENCY: <DIM>#<COLUMN>`) — rename in the
+   node, do not duplicate. And DSP refuses to remove a column while any view reads it
+   (`NOT_MODIFY_IN_USE`), so a rename is a **two-stage rebuild**: deploy every view in the chain
+   with *both* names, switch consumers top-down to the new name, then remove the old one
+   bottom-up. The same lock means: when a model uses a view's association, **redeploy the
+   models first, then the view**.
+7. A new column in a *source table* must be **re-registered** (re-imported) before a view can
+   reference it, or the view deploy answers `MISSING_DEPENDENCY: <TABLE>#<COLUMN>`.
+
+#### Tables in the Open SQL Schema are invisible to the space
+
+Data loaded into the space's Open SQL Schema (§1.4) does **not** appear in the Data Builder, and
+no view may reference it — the deploy fails with `depends on following missing objects`.
+Datasphere knows only **space objects**. The route: one local table per source table whose CSN
+points at the existing one —
+
+```json
+{"definitions":{"<NAME>":{"kind":"entity",
+ "@ObjectModel.modelingPattern":{"#":"DATA_STRUCTURE"},
+ "@DataWarehouse.external.schema":"<SPACE>#<DBUSER>",
+ "@DataWarehouse.external.entity":"<NAME>",
+ "elements":{ … }}}}
+```
+
+— created with `objects local-tables create`. Tables first, then views.
+
+#### Folders: not a CLI concept
+
+There is no `folders` command, no `--folder` option, and the object CSN carries no folder —
+folder membership is **repository metadata**. New objects therefore land in the **space root next
+to the customer's objects** and are noticed when somebody opens the space. Assigning happens on
+the internal repository route (`POST /deepsea/repository/<SPACE>/objects/`, §2.1), and
+`parent` / `folderAssignment` expect the **technical folder name**, not its GUID — an unknown
+value is silently ignored and the object stays in the root. After every scripted run, list the
+objects and check where they went.
+
 ### 1.3 Consumption APIs (OData)
 
 Two endpoints, both bearer-authenticated:
@@ -231,7 +339,13 @@ Two endpoints, both bearer-authenticated:
   "CDS compilation failed") — AMs are consumed through the analytical API or through InA, which
   is the protocol SAC itself uses.
 - **These endpoints need the bearer token; browser cookies return 401.** That is the practical
-  dividing line between the two access planes.
+  dividing line between the two access planes — with one useful exception: `$metadata`.
+- **`GET …/consumption/analytical/<SPACE>/<AM>/$metadata` with `Accept: application/xml`
+  (JSON → 406) is the cheapest health check an analytic model has.** It answers 200 or 500 per
+  model, in seconds, from the logged-in browser session, and it is the same path SAC takes when
+  it fails with "contact your administrator" plus an unresolvable correlation id. Run it after
+  every model change; the classic 500 is a hierarchy node with two validity slices
+  (`DSP_KNOWLEDGE.md` §12.6).
 
 ### 1.4 HANA Open SQL Schema — real SQL access
 
@@ -377,6 +491,24 @@ newest log entry**; a naive search over the whole response matches an older `COM
 reports "done" far too early. See `DSP_KNOWLEDGE.md` §5 for the failure semantics of the first PERSIST after a
 deploy.
 
+**What `directexecute` will and will not start** (same body shape, `activity` varies):
+
+| `applicationId` / `activity` | Result |
+|---|---|
+| `VIEWS` / `PERSIST` | 202 `{taskLogId}` ✔ |
+| `DATA_FLOWS` / `EXECUTE` | 202 ✔ — a first **502 Bad Gateway** can be transient; retry before reading it as a refusal |
+| `TASK_CHAINS` / `EXECUTE` | **403 `insufficientPermission`** — "a task of this type cannot be triggered by this user". Starting chains stays an operator click (or the CLI's `tasks chains run` with a proper identity, §1.6) |
+
+**A task chain's definition is not readable from the client.** `designObjects` returns metadata
+only (`details=…,content` is ignored), `/dwaas-core/tf/<S>/taskchains/<id>` expects a **log id**
+(a run, not the definition), and the editor keeps the graph in no reachable UI model. Nodes *and*
+edges appear only in a run log — so verify a chain's structure with a test run:
+`/dwaas-core/tf/<S>/taskchains/<logId>` returns `tasks[]` with `objectName`, `activity`
+(`RUN_CHAIN` / `REMOVE_PERSISTED_DATA` / `PERSIST` / `EXECUTE`), `status`, `startTime`.
+
+⚠️ **Log timestamps are UTC.** Against a CEST shell, a freshly started run looks like a hung node
+for two hours. Check the timezone before diagnosing a stall.
+
 ### 2.4 Deleting an object
 
 > ⚠️ **A destructive mutation on the internal plane** — unlike the rest of §2, which is
@@ -390,6 +522,64 @@ DELETE /dwaas-core/repository/<SPACE>/objects/     body: {"object_id":"<GUID>"}
 ```
 
 The GUID comes from `designObjects?details=name,id`.
+
+### 2.5 Reading data the Data Viewer's way
+
+The Data Viewer itself reads through an OData v4 endpoint on the browser session — useful when
+the Data Export API is unwanted (it writes a log entry per export, which some customers object
+to) and when all you need is a count:
+
+```
+GET /dwaas-core/data-access/instant/<SPACE>/<OBJECT>/_<OBJECT>?$format=json&$top=5
+GET /dwaas-core/data-access/instant/<SPACE>/<OBJECT>/$metadata
+GET …/_<OBJECT>?$apply=aggregate($count as n)                    # count server-side
+GET …/_<OBJECT>?$apply=groupby((_<FIELD>),aggregate($count as n))
+```
+
+- **The leading underscore is the trap.** The second path segment is the *entity-set name*.
+  Names starting with a **digit** — most of them in an SAP landscape (`04VR_…`, `03TR_…`) — are
+  not valid OData identifiers, so DSP prefixes `_`. The same applies to **field names**
+  (`0logsys` → `_0logsys`, `/BIC/HK_FTE` → `_BIC_HK_FTE`). Without the prefix: `400 Expected uri
+  token 'ODataIdentifier' could not be found … at position 1`, which reads like a broken name.
+  When in doubt, pull `$metadata` and read `<EntitySet Name>` / `<Property Name>`.
+- 🔴 **Never measure in parallel.** `Promise.all` over several objects returns, on a server-side
+  timeout, an **empty aggregate (`n: 0`) with HTTP 200** instead of an error. A parallel run
+  reported 0 rows where a sequential one found 79,000, and every conclusion built on it was
+  wrong. A `for` loop with `await`, and every relevant zero counter-checked with `$top=1`.
+- On wide UNION views even `$apply` takes minutes or never returns — "no heavy previews" applies
+  to aggregations too.
+- The `/deepsea/…` routes (§2.1) are **metadata only**; every data path there is a 404.
+
+### 2.6 Operating a bulk deploy
+
+Notes from four full runs of ~200 views and ~25 analytic models in one day, each of which failed
+for a different reason — **none of them in the data**:
+
+1. **The `401` mid-run is not a session end — it is a token refresh.** Measured: `buildcqn → 401`
+   at 22:31 took 18 views down with it; at 22:40 the **same session**, with nobody logging in
+   again, answered the same call 200, and the 18 views went through 18/18. SAP renews the session
+   token in the background, and calls during that window get 401. **Wait and retry** (four
+   attempts, 20 s apart, worked) — and retry **only** 401: a `422 MISSING_DEPENDENCY` or SQL that
+   HANA rejected fails the second time exactly the same way. Check the session in three seconds
+   from the tab: `fetch('/dwaas-core/api/v1/spaces').then(r => r.status)` — 200 means alive.
+   (An earlier version of this note said "the session lasts ~1 h, deploy in blocks"; that was
+   wrong, and it is why a batch sat undeployed for days.)
+2. **Never hardcode the browser tab id.** Chrome assigns a new one on every reopen; a stale id
+   disguises itself as a deploy error (`no page target matching '…'`). Look the target up on
+   `http://<host>:<port>/json/list` — and **when more than one tab matches, abort with the list
+   rather than pick**: a deploy into the wrong space costs more than an abort, and it happens
+   for real as soon as someone logs in twice.
+3. **`NOT_MODIFY_IN_USE`** — redeploy the analytic models first, then the view (§1.2).
+4. **Analytic models are a separate path.** A "deploy everything" that covers only views is not
+   one; verify the consumption layer separately (the `$metadata` probe, §1.3).
+5. **A hung deploy has a signature:** process alive, **CPU time 0**, no open connection, log
+   frozen. The browser connection is gone and the deploy waits without a time limit. Kill it,
+   take the deployed names from the log, re-run the rest by name.
+6. **Persistence survives a redeploy without structural change** (`DSP_KNOWLEDGE.md` §5) — do
+   not schedule a re-persist reflexively.
+7. **Folders are not passed through** (§1.2) — check where the objects landed after the run.
+8. After every model deploy, read the SAC-side dimension name — it is not deploy-stable (KBA
+   3487607, `DSP_KNOWLEDGE.md` §13).
 
 ---
 
@@ -453,6 +643,22 @@ driving the UI is the remaining path. Three things are worth knowing before star
   reload, sometimes with a wait before the first call.
 - **Heavy monitor pages are a known renderer trap** — use the monitoring APIs in §2.2 instead of
   opening the Data Integration Monitor.
+- **Synthetic clicks are untrusted.** `el.dispatchEvent(new MouseEvent('click'))` opens no
+  popup, so every flow that depends on one — an SSO handshake above all — fails, with a message
+  that looks like a server or authorization problem ("no access to the Datasphere spaces",
+  "connection to the tenant failed"). The application's error text is no proof of the cause
+  when the input itself was not real. Use real input (`Input.dispatchMouseEvent` over CDP, or
+  a real automation framework's click); drag & drop additionally needs a dwell on the target or
+  the drop lands nowhere, silently.
+- **Address tabs by target id, never by URL substring**, as soon as more than one tab of the
+  same tenant is open: a substring match takes the *first* hit, and on a shared browser that can
+  be a colleague's story in edit mode. Open new tabs via `PUT /json/new?<url>` — it sidesteps
+  the `beforeunload` dialog that navigating an unsaved tab triggers.
+- **A crashed driver leaves its headless browser alive.** The next run with the same port and
+  profile attaches to the *old* page, whose state has already advanced — "state nothing on the
+  page could have set", instrumentation that never fires. Compare `performance.timeOrigin` with
+  the run's start before debugging page state; give drivers a per-process port and profile plus
+  a terminate-on-exit.
 
 The stronger pattern in every case is **drive in one channel, verify in the other**: change
 something in the UI and confirm it through the CLI or the repository API (or the reverse). Two

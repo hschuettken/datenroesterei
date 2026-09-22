@@ -24,7 +24,7 @@ This repository is the evidence; that is the argument.
 
 ## What is here
 
-### [`datasphere-sac-field-guide/`](datasphere-sac-field-guide/) — seven documents, ~3,100 lines
+### [`datasphere-sac-field-guide/`](datasphere-sac-field-guide/) — seven documents, ~3,700 lines
 
 A working reference for building and operating SAP Datasphere and SAC planning. Modeling
 knowledge and programmatic access are kept apart on purpose: the modeling files are read front to
@@ -32,11 +32,11 @@ back, the access files are opened when a specific question comes up.
 
 | Document | Covers |
 |---|---|
-| `DSP_KNOWLEDGE.md` | architecture, artifact types, view design, HANA SQL quirks in DSP, persistence, space design, integration, performance, security, deployment, semantics & hierarchies |
-| `DSP_PROGRAMMATIC_ACCESS.md` | OAuth and the identity model, the CLI, consumption OData, Open SQL Schema, writing data, orchestration, design-time & monitoring APIs, transport |
-| `SAC_KNOWLEDGE.md` | planning models, data actions, advanced formulas in depth, allocations, multi actions, performance, pitfalls, authoring a data action end to end |
+| `DSP_KNOWLEDGE.md` | architecture, artifact types, view design, HANA SQL quirks in DSP, persistence, space design, integration, performance, security, deployment, semantics & hierarchies, design rules from the field |
+| `DSP_PROGRAMMATIC_ACCESS.md` | OAuth and the identity model, the CLI (incl. SQL views and analytic models from CSN), consumption OData, Open SQL Schema, writing and reading data, orchestration, design-time & monitoring APIs, operating a bulk deploy, transport |
+| `SAC_KNOWLEDGE.md` | planning models, data actions, advanced formulas in depth, allocations, multi actions, performance, pitfalls, asymmetric reporting, authoring a data action end to end |
 | `SAC_APIS.md` | the four SAC access planes, OAuth, Data Import/Export, Content Network, SCIM, the DES protocol, InA, import-job automation |
-| `SAC_SCRIPTING.md` | the scripting language and its limits, the API catalogue, filters, hierarchy format, master-data CRUD, the planning API, utility classes |
+| `SAC_SCRIPTING.md` | the scripting language and its limits, the API catalogue, filters, hierarchy format, master-data CRUD, the planning API, utility classes, custom-widget delivery |
 | `SEAMLESS_PLANNING.md` | SAC planning persisted in Datasphere: the inverted architecture, prerequisites, the restrictions that decide feasibility, sizing |
 
 Start with [the guide's own README](datasphere-sac-field-guide/README.md). Two walkthroughs of the

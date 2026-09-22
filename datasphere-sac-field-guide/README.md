@@ -11,7 +11,7 @@ HTTP 200 and does nothing, the data action that completes successfully and write
 export that looks complete and is missing everything past the page cap, the import that reports
 zero rejects and loads the wrong rows. Those cost the most time and are the least documented.
 
-Seven documents, ~3,100 lines. Modeling knowledge and programmatic access are kept apart on
+Seven documents, ~3,700 lines. Modeling knowledge and programmatic access are kept apart on
 purpose: the modeling files are the ones you read front to back, the access files are the ones
 you open when a specific question comes up.
 
@@ -35,12 +35,12 @@ identifiers are placeholders.
 
 | File | What is in it | Read it when |
 |---|---|---|
-| **`DSP_KNOWLEDGE.md`** | 4-layer architecture, artifact types, view design patterns, HANA SQL quirks in DSP, persistence strategy, space design, data integration, performance, security, deployment, associations / texts / semantic types / hierarchies | you are modelling in Datasphere |
-| **`DSP_PROGRAMMATIC_ACCESS.md`** | OAuth and the identity model, the Datasphere CLI, consumption OData, HANA Open SQL Schema, writing data, orchestration, design-time and monitoring APIs, transport & content packages, Datasphere ↔ SAC, browser-driven automation | you are automating, integrating or operating Datasphere |
-| **`SAC_KNOWLEDGE.md`** | planning model fundamentals, data actions and their step types, advanced formulas in depth, allocations, multi actions, performance, pitfalls, model-type migration, field-tested gotchas, authoring a data action end to end | you are building or reviewing SAC planning logic |
+| **`DSP_KNOWLEDGE.md`** | 4-layer architecture, artifact types, view design patterns, HANA SQL quirks in DSP, persistence strategy, space design, data integration, performance, security, deployment, associations / texts / semantic types / hierarchies, design rules from the field | you are modelling in Datasphere |
+| **`DSP_PROGRAMMATIC_ACCESS.md`** | OAuth and the identity model, the Datasphere CLI, consumption OData, HANA Open SQL Schema, writing data, orchestration, design-time and monitoring APIs, SQL views and analytic models from CSN, reading data the Data Viewer's way, operating a bulk deploy, transport & content packages, Datasphere ↔ SAC, browser-driven automation | you are automating, integrating or operating Datasphere |
+| **`SAC_KNOWLEDGE.md`** | planning model fundamentals, data actions and their step types, advanced formulas in depth, allocations, multi actions, performance, pitfalls, model-type migration, field-tested gotchas, asymmetric reporting, authoring a data action end to end | you are building or reviewing SAC planning logic |
 | **`SAC_APIS.md`** | the four SAC access planes, OAuth, Data Import / Data Export / Content Network / SCIM, the Data Export Service protocol, InA, import-job automation, the internal FPA REST layer and why it is not an integration path | you are integrating SAC with anything |
 | **`SEAMLESS_PLANNING.md`** | SAC planning persisted in Datasphere: the inverted architecture, where the compute lands, the mandatory prerequisites, live versions and currency, the restrictions that decide feasibility (no account models, no migration tooling, hierarchies not exposed), sizing and noisy neighbours, and a use-it/don't-use-it call | you are deciding whether — or how — to run SAC planning on Datasphere |
-| **`SAC_SCRIPTING.md`** | what the SAC scripting language can and cannot do, the full API catalogue, filter reading, hierarchy format, master-data CRUD, running actions synchronously vs in the background, the planning API (versions, private-version housekeeping, data locking), the utility classes, a maintainability layering and a review checklist | you are writing or inheriting story / analytic-application scripts |
+| **`SAC_SCRIPTING.md`** | what the SAC scripting language can and cannot do, the full API catalogue, filter reading, hierarchy format, master-data CRUD, running actions synchronously vs in the background, the planning API (versions, private-version housekeeping, data locking), the utility classes, a maintainability layering, a review checklist and the custom-widget delivery traps | you are writing or inheriting story / analytic-application scripts |
 
 ## If you only read five things
 

@@ -53,6 +53,23 @@ authorized against the specific provider/data source. Two practical consequences
 - Budget for one round of "create the client with the right purpose and Access role" before
   estimating the integration itself.
 
+**Three OAuth facts that are decisions, not tasks, in a productive tenant:**
+
+- **The client secret cannot be rotated.** After creation it is neither visible nor changeable;
+  SAP's own help says to delete the client and recreate it — which also changes the **client
+  id**, so every consumer has to be reconfigured. There is no API for it either (the obvious
+  `/api/v1/oauth/clients` and `/administration/oauthclients` paths answer 404; the XSUAA client
+  routes need `uaa.admin`, which an API client does not carry). It stays a browser task under
+  App Integration — plan it, do not discover it.
+- **A `SAML 2.0 Bearer` client uses the alias token endpoint**
+  (`/oauth/token/alias/<subaccount>.<landscape>`), not the plain `/oauth/token` printed on the
+  page. Sending the assertion to the wrong one produces an error that looks like an
+  authorization problem and is not.
+- **A `client_credentials` client does work for the public REST APIs** where its purpose and
+  Access selection allow it, and its token lives ~24 h — which makes it the first SAC access
+  that does not depend on a browser session (the 25–30-minute session expiry is the most common
+  failure of any longer automation on the internal planes, §4/§6).
+
 **Host nuance:** the APIs are documented under the public analytics host
 (`https://<tenant>.<region>.sapanalytics.cloud/api/v1/…`), but tenants on other SAP domains
 expose them under their own host as well. Confirm the working base URL per tenant rather than
@@ -67,6 +84,22 @@ Datasphere side).
 | **Data Export Service** | `/api/v1/dataexport/…` | read model data and metadata as OData (§3) |
 | **Content Network API** | `/api/v1/content/…` | export/import content packages — **the one supported way to move a changed model definition**, whole-object rather than delta |
 | **SCIM** | `/api/v1/scim` (legacy), `/api/v1/scim2` (Cloud Foundry tenants only), `/api/v1/scim3` | users and teams CRUD; transport users/teams between tenants. **Three endpoint generations with different base paths** — pick deliberately; `/api/v1/scim` is the oldest, not the current one |
+
+**SCIM — the two traps that delete the wrong thing** (verified against the current help):
+
+1. **A team and a role are the same resource type** (`/Groups`). They differ only in the SAP
+   extension: `urn:ietf:params:scim:schemas:extension:sap:2.0:Group → type` is `userGroup` for a
+   team and `authorization` for a role. Code that filters by name and never checks the type will
+   one day delete a role that happens to share a team's name. **The type is the ownership
+   check.**
+2. **Members are addressed by user UUID, not by user name** — and `members[].display` is the
+   *display name* ("JANE DOE"), not the login. Both directions need a preloaded `/Users`
+   directory.
+
+Also: there is **no add-member endpoint** — membership changes are a `PATCH` on the group with
+`op: add` / `remove`, **never `replace`** (which evicts everyone else). A `409` on create is a
+name conflict, not proof of ownership and not a source for the id. The CSRF token is required
+only on the browser domain; the direct API domain does not need it.
 
 **The structural limit worth stating up front:** none of the supported APIs can *add a dimension
 or change a formula in place*. Master data and facts are fully covered; model **structure**

@@ -18,6 +18,16 @@ arriving in hierarchy format.
 | plain array literals (`var a = []`) | `ArrayUtils.create(Type.string)` |
 | defining functions inside an event handler | **script objects** — and they are **per story**, so a helper written in one story does not exist in another |
 | `undefined`/loose typing tricks | declare return types on script-object functions; a missing return type silently discards the value |
+| the literal `null` | rejected outright ("You can't use "null" statement") — use an empty string, a sentinel number, or a length check |
+| `ConvertUtils.integerToString` | does not exist; `ConvertUtils.numberToString` |
+| reaching a widget on **another page** — also from a script object | forbidden (`Not able to access "Table_1" which is not in current page`); keep logic per page and pass state through global variables |
+
+Two runtime facts that shape debugging: **validation errors surface as `console.error` in the
+main frame** (readable over a browser automation channel), whereas a script's own
+`console.log` may not — diagnose with `Application.showMessage` instead. And **events inserted
+into the story JSON by hand may never fire**: one page's `onInitialization` ran, another page's
+`onActive` / `onInitialization` did not, most likely because page metadata is computed only
+when the editor saves. Touch a new handler once in the script editor and save through the UI.
 
 The one structured type you do use as a literal is the **member payload** for master-data writes
 (`{id, description, properties:{…}}`), which is accepted because it is a typed API argument.
@@ -28,7 +38,7 @@ nothing. Check both when reviewing.
 
 ## 2. The API surface
 
-The authoritative catalogue is SAP's **Optimized Story Experience API Reference Guide** (see §12),
+The authoritative catalogue is SAP's **Optimized Story Experience API Reference Guide** (see §13),
 which is organised alphabetically by class. What follows is a map of it — what exists, grouped by
 what you would go looking for.
 
@@ -93,6 +103,24 @@ Three things go wrong here in practice:
    naive search-and-replace across a story definition destroys the already-migrated references.
    Count first, replace by descending length or with word boundaries, and verify the residual count
    before saving.
+
+### Dimension instances are per model dataset, not per widget
+
+`Category`, `Category.Group`, `Category.SubGroup` — and `Date.YEAR` / `Date.CALMONTH` — are
+**one instance** per model dataset in an optimized story. Four variants all fail with
+`Store.CanNotRecreateInstance` or "instance already exists":
+
+- removing one level and adding another level of the same base in the same script run;
+- adding a level while the base (or another level) sits on a widget of the same model;
+- a Linked-Analysis filter (widget) and `setDimensionFilter` (script) on the same dimension in
+  the same tick;
+- a custom widget's own data-source filter and a script filter in the same tick.
+
+The error arrives as "script execution failed" with no cause; only the `dimensionId` in the
+developer message names the base. **Separate everything that touches the same base into
+different events or ticks** (a few hundred milliseconds apart is enough), remember bases removed
+in a run and do not re-add them in the same run, and skip filters the widget already applied
+through Linked Analysis.
 
 ## 4. Hierarchy format — the conversion everyone needs
 
@@ -361,10 +389,48 @@ Every item below was found in production or in official training material:
 - [ ] fiscal periods derived from calendar dates in script instead of `CurrentDateTime.createFiscalDateTime()`
 - [ ] widgets bound to a different model than the scripted action gadget
 - [ ] declared-but-unused global variables (harmless, but a reliable sign of unfinished work)
+- [ ] a script object that reaches into widgets of another page (fails at validation, §1)
+- [ ] two operations on the same dimension base in one event (`CanNotRecreateInstance`, §3)
 
 ---
 
-## 12. Sources
+## 12. Custom widgets — the delivery traps
+
+Custom widgets (Analytic Applications → Custom Widgets, a JSON manifest plus hosted
+JavaScript) are straightforward to write and surprisingly hard to *ship*. Every item below was
+measured in a tenant; none is visible from the code.
+
+1. **The manifest `version` is strict `x.y.z`.** A pre-release suffix (`3.4.0-beta.11`) is
+   rejected at upload. Keep build identifiers in the version control log, never in the tenant
+   JSON.
+2. **SAC caches widget files per URL, not per manifest version.** With an unchanged URL the
+   tenant keeps running the old file indefinitely — after re-uploading the manifest *and* after
+   removing and re-inserting the widget. The failure disguises itself as a code bug. Stamp a
+   version into every web-component URL (`…/widget.js?v=<version>`) at delivery time; let the
+   main script read its own version off its own address and pass it to everything it lazy-loads.
+3. **`[hidden]` loses against any author rule that sets `display`.** An overlay with
+   `.x{display:flex}` and the `hidden` attribute is never hidden, because `[hidden]{display:none}`
+   comes from the browser's user-agent stylesheet. Symptom: the tile draws its frame, the
+   content stays white, and the DOM looks healthy (`element.hidden === true`). Always ship
+   `.x[hidden]{display:none}` alongside.
+4. **The host must be reachable from the user's browser, unauthenticated.** SAC loads widget
+   resources at runtime, cross-origin, from the *viewer's* browser. Any authentication layer in
+   front (SSO, access proxy, basic auth) breaks the load, and an internal server does not reach
+   a customer laptop. Consequence: no customer data, names or tenant URLs in the JavaScript.
+   Set `Access-Control-Allow-Origin` in exactly **one** rule (concatenated headers become
+   `*, *`, which is invalid), and disable CDN caching for the widget host or changes stay
+   invisible for hours.
+5. When the widget is embedded in an iframe of its own, check the `targetOrigin` of every
+   `postMessage` — the SAC frame is not the origin you tested against locally.
+6. **A widget should not join data.** The browser is the wrong place for it — the tempting
+   pattern (fetch two result sets, join on the drill-down key in the widget) is slow, breaks on
+   pagination and duplicates model logic. Send the question plus context (filters, selection) to
+   a backend that owns the data; bring back a result, or a list of proposals the story script
+   writes into a private version.
+
+---
+
+## 13. Sources
 
 - **Optimized Story Experience API Reference Guide** (published per release; the class catalogue,
   method signatures, enums and event handlers) —

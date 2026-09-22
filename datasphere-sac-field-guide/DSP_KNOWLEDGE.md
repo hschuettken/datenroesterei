@@ -9,7 +9,7 @@
 **Modeling** — §1 architecture · §2 artifact types · §3 view design patterns ·
 §4 HANA SQL quirks in DSP · §5 persistence & the Data Viewer · §6 space design ·
 §7 data integration · §8 performance · §9 security · §10 deployment · §11 mistakes checklist ·
-§12 associations, texts, semantic types & hierarchies
+§12 associations, texts, semantic types & hierarchies · §13 design rules from the field
 
 **Programmatic access** — see the companion file **`DSP_PROGRAMMATIC_ACCESS.md`** —
 OAuth, CLI, consumption APIs, Open SQL Schema, writing data, design-time & monitoring APIs,
@@ -146,7 +146,8 @@ WHERE DATAB >= '20220101'                            -- cut off ancient records
 3. **Every `UNION ALL` leg needs column aliases** — not just the first.
 4. **`SELECT *` fails on cross-space references** — always list columns explicitly.
 5. **Avoid `-->` inside block comments** — the parser can misread it even within `/* */`;
-   use `--` or `=>`. Symptom is the same as the CTE error.
+   use `=>`. Symptom is the same as the CTE error. (And `--` line comments have their own
+   problem on the compile step — see #16.)
 6. **Cross-space access requires sharing, and the reference is ONE quoted identifier** —
    write `"OTHER_SPACE.OBJECT"`, not the two-part `"OTHER_SPACE"."OBJECT"`. A 404 on a
    correctly spelled reference means "not shared in Space Management", not a SQL error — so
@@ -174,6 +175,33 @@ WHERE DATAB >= '20220101'                            -- cut off ancient records
     tracking: the code is visibly there, `Save` stays greyed out, and nothing is persisted.
     Type through the keyboard, or go straight to `Deploy` (recent versions save+deploy in one
     step).
+15. **`CAST(NULL AS DECIMAL(p,s))` inside a `UNION` leg breaks the CSN compiler**, not HANA.
+    The deploy answers `CSN_COMPILATION_FAIL … Column <X> could not be resolved`, pointing at a
+    column that plainly exists in the SELECT list. The SQL→CQN step renders the cast as a typed
+    NULL literal, and the CSN compiler cannot resolve it inside a `SET` branch. Use the function
+    form — `TO_DECIMAL(NULL, p, s)` — which compiles. In one chain of a dozen views this was the
+    *only* difference between "deploys" and "does not deploy".
+16. **`--` line comments break the SQL→CDS compile step.** The compile endpoint the editor uses
+    (`/dwaas-core/cdssql/buildcqn`) answers `400 CDS compilation failed`: with a comment
+    *before* `SELECT` it quotes the whole statement back and names no cause at all; with a comment
+    inside the SELECT list it points at a word in the comment (`Extraneous ‹Identifier›`). HANA
+    parses the same SQL fine, so a `DESCRIBE` succeeds and the column list is right — only the CDS
+    step fails. Strip whole-line comments before deploying (a deploy script can do that, so the
+    `.sql` files stay documented). Side note: the error echoes the entire statement, which eats
+    any message budget — drop the echoed `sql` field before truncating a response, or you never
+    see the real complaint.
+17. **A join needs a column predicate.** A deliberate cross join written as `… JOIN x ON 1 = 1`
+    compiles in the CQN step but is rejected at deploy. Join to a small real driver table on an
+    actual column instead.
+18. **A computed DECIMAL has no scale — and `scale: 0` makes SAC round every record.** Any
+    arithmetic in a view yields a scale-less DECIMAL; `SYS.VIEW_COLUMNS.SCALE` reports `NULL`.
+    A CSN generator that maps that with `int(scale or 0)` declares the measure as an
+    **integer** — HANA still returns the full value, every SQL check passes, and only the client
+    is wrong: SAC rounds *each record before aggregating*, so a column summing to `56.71` arrives
+    as `37`, and a euro column of `56,714,887.60` as `56,714,873` — exactly `SUM(FLOOR(x))`. At
+    million-euro totals the loss looks like a cent difference and goes unnoticed for years. Never
+    map a NULL scale to 0; after deploying a fact, read the deployed CSN
+    (`datasphere objects views read …`) and check `elements.<MEASURE>.scale`.
 
 ---
 
@@ -231,9 +259,14 @@ a busy state of the preview pane, not a SQL error. Measure twice before drawing 
 
 ### Persistence lifecycle — what invalidates what
 
-- **Deploying the view itself throws its persisted data away.** The task log shows
-  `REMOVE_PERSISTED_DATA` immediately, and the Data Viewer silently switches back to the live
-  view — numbers move without any logic change.
+- **Deploying the view itself with a structural change throws its persisted data away.** The
+  task log shows `REMOVE_PERSISTED_DATA` immediately, and the Data Viewer silently switches back
+  to the live view — numbers move without any logic change. A redeploy that leaves the column
+  list and types untouched (annotations, associations, semantics) **keeps** the persisted data —
+  measured across four full runs of ~200 views. The widespread "every deploy means re-persist"
+  assumption costs unnecessary rework. A related measurement: persisting a *base* view sped up
+  the drill-down built on top of it by ~40 % without materialising the big view itself — the
+  gain is often one level below where you would put it.
 - **Deploying an *upstream* view does NOT invalidate it** (verified by measurement). But the
   snapshot is then stale: after any upstream data change you must re-persist, or the view keeps
   serving the old state.
@@ -404,6 +437,13 @@ WHERE d.key IS NULL
 | Trusting HTTP 200 from an API call | many failures answer 200 with an HTML login page or an ignored payload | test the response body, verify with a counted read (`DSP_PROGRAMMATIC_ACCESS.md` §1–2) |
 | Lost leading zeros in SAP key fields | joins match nothing; rows disappear through INNER JOINs | `LPAD(TRIM(col), 18, '0')` defensively in the load view (§4.12) |
 | Re-persisting right after a deploy | first PERSIST fails, and a follow-up can cancel persistence entirely | wait, retry once, then check the activity list (§5) |
+| A hierarchy node with two validity slices | every analytic model on that dimension answers HTTP 500, with no message anywhere | restrict the hierarchy to the current slice; verify per model with the `$metadata` probe (§12.5) |
+| `CAST(NULL AS DECIMAL)` in a UNION leg | `Column X could not be resolved` at deploy | `TO_DECIMAL(NULL, p, s)` (§4.15) |
+| Computed measure deployed with `scale: 0` | SAC rounds every record before aggregating | never map a NULL scale to 0; check the deployed CSN (§4.18) |
+| A rule the business maintains as a hierarchy branch, implemented as an account whitelist in SQL | the two drift apart within days; new accounts pass unfiltered by default | filter on the hierarchy branch plus a short documented exception list (§13) |
+| A flag named after its intent but defined by a convenient proxy | seven joins exclude the wrong rows; `SUM(x * NULL)` drops them silently | define the flag on the attribute it is named after; never let a NULL from a conversion reach a SUM (§13) |
+| A view with no analytic model above it | it never reaches a user; dead weight in every refactor and test | check from the table: does it reach an AM? name the consumer or drop the view (§13) |
+| A KPI defined only in a document | three evaluations, three values, each "correct" | put population, reference and variants on the AM element's `@EndUserText.quickInfo` (§13) |
 
 ---
 
@@ -507,3 +547,145 @@ Hierarchy-with-Directory view. That is often more transparent than the import, a
 only option when the hierarchy is maintained as a set rather than as a BW hierarchy.
 
 ---
+
+### 12.6 Validity-dated hierarchies: one slice per node, or the analytic model dies
+
+Sources with validity dates give a node that was re-parented **two rows**. The hierarchy view
+then carries the key `(NODE, VALID_FROM)`, but the hierarchy *association* on the dimension maps
+only `NODE → NODE`. The analytical engine cannot pick a slice and answers **HTTP 500 — no
+message, no log entry, and nothing invalid in HANA** (`IS_VALID` stays `TRUE`). SAC shows only
+"contact your administrator" plus a correlation id nobody can resolve.
+
+Measured on one tenant: 21 of 31 analytic models failed, and the split was exact — every failing
+model carried the affected dimension, none of the working ones did. Of eleven hierarchies,
+exactly two had a multiply-sliced node.
+
+**The reproducer to know** — the same path SAC takes, from the logged-in browser session, in
+seconds per model, without a story:
+
+```
+GET /api/v1/datasphere/consumption/analytical/<SPACE>/<AM>/$metadata
+Accept: application/xml            -- with application/json the answer is 406
+```
+
+200 = consumable, 500 = broken. Use it to *test* a model change instead of believing it.
+
+**Fix:** restrict the hierarchy to the current slice (`VALID_TO = '99991231'`). The history is not
+lost — it stays in the source and belongs in a key-date model, not in the hierarchy. Reporting
+shows today's structure.
+
+**The trap next to it, same place:** orphan handling ("empty parent → collector node") turns the
+**root** into a child of the collector when the root itself has an empty parent — a cycle, a
+hierarchy without a root. HANA does not notice that either. On the tenant above it was a genuine
+second defect, but **not** the cause of the 500s: perfect correlation, wrongly guessed causality.
+The counter-check that rules out the wrong explanation: another validity-dated hierarchy *without*
+a multiply-sliced node was never affected. Only the intervention decides.
+
+---
+
+## 13. Design Rules from the Field
+
+Seven rules that each cost a day or a demo. None depends on a specific tenant.
+
+### No consumer, no view
+
+**Only analytic models are usable from SAC.** A view without a cube above it has no path to a
+user — justifications like "belongs on a tile wall" are not reasons but impossibilities, because
+without an AM the wall cannot exist. **Check from the table, not from the view:** for every
+table, does it get passed through to an analytic model? If not, there are exactly two honest
+answers: it feeds something (customizing that drives an account determination; a text on a
+dimension) — then justify it **with the consumer's name**, never with a layer rule; or it answers
+nothing — then the table is the problem, not the view. "1:1 inbound layer by convention" is
+**not** a justification: an inbound layer is a connection point, and a connection with nothing
+connected is ballast carried and tested through every refactor. After turning the check around on
+one model, 57 of 79 tables reached a cube, none remained open — and a finished supplier-on-time
+view turned out to have been built and never wired up.
+
+### A KPI without a definition drifts
+
+Twice in one day: the same KPI, three evaluations, three values — **each computed correctly,
+each defined differently** (scrap *rate* vs scrap *in euros*; pooled across all machines vs per
+machine, where pooling bakes the between-machine level difference into the lag; a different data
+snapshot). **The definition belongs on the object** — `@EndUserText.quickInfo` on the element in
+the analytic model, where a modeller opens it — not in a document next to it: population,
+reference figure / reference date, assignment rule, and **the variants with their values**,
+phrased as "whoever names a different number names a different population."
+
+A side finding of the same kind: on-time delivery measured against the *re-maintained* date came
+out at exactly **100.00 %** — a KPI that measures one's own date maintenance and carries no
+information. Against the frozen original date: 91 %. The 100 % is the result, not the 91.
+
+### A flag named after its intent, defined by the convenient proxy
+
+A flag meant to mark fixed-rate exchange rows was defined as "rate date ends in 0101" — that is
+the **January row**, not the fixed rate; both rate types have a January row. Seven currency joins
+therefore excluded the January *monthly* rate as well, the conversion returned `NULL`,
+`SUM(amount * NULL)` dropped the row silently, and revenue in the warehouse sat **3.5 % below**
+the same stock in a second system — a gap that would have appeared side by side in a demo. A
+quality view that did not filter on rate type at all hit **two** rate rows per posting and
+reported 4.9 million "checked" rows for 3.2 million real ones.
+
+The rule: the condition of a flag belongs on the attribute it is named after (`RATE_TYPE = '1JAN'`),
+not on a date that usually coincides with it. And **a NULL from a conversion must never reach a
+SUM** — the row vanishes there instead of standing out. The silent one (missing rate → factor 1
+instead of aborting) is the same mistake with the opposite sign.
+
+### A filter whitelist drifts from the hierarchy it mirrors
+
+A business rule ("material cost only from production orders") implemented as an **account
+whitelist in the view SQL**, while the business maintains the account hierarchy in the member
+dimension: within six days, 6 of 16 accounts in the relevant branch were missing from the list
+and passed unfiltered, and one list entry was no longer a member at all. **Flip the default:**
+express the rule on the hierarchy branch (`PARENT_KEY LIKE '<branch>%'`) plus a short,
+documented exception list. Then new members are right by default and an exception requires a
+decision. This holds for any rule whose scope is maintained somewhere else.
+
+### An analytic model has no jump target
+
+There is no equivalent of BW's report-report interface (RSBBS/RRI). SAP's RRI in SAC is attached
+to **BEx queries over BW live connections**, not to Datasphere models. A jump is a property of
+the SAC **story** (Linked Analysis), and its prerequisite sits in the Datasphere model: the
+widgets must be based on the same model, or the source models must contain linked dimensions
+whose **IDs match**. Two fact columns with the same name are not enough — the conformed
+dimension with an identical id is the real work, and it belongs in the model, not in the story.
+
+Two things to plan for:
+
+- **The SAC-side technical name of a Datasphere dimension is not deploy-stable** (SAP KBA
+  3487607): charts break after a redeploy of the cube without anything being wrong with the
+  model. Read the value in SAC after every model deploy — and never `delete` + `create` a model
+  (`DSP_PROGRAMMATIC_ACCESS.md` §1.2).
+- **Grain.** Jumping from a summary tile is the mistake. Measured on a document-flow model
+  (1.8 million edges, 134 thousand chains, median 10 edges per chain): a sales tile at customer ×
+  month hit ~10 chains on average, a finance tile at account × period hit **826** (max 8,510).
+  The jump belongs on a row already broken down to the chain — two-stage: tile → document list →
+  document flow. Cubes whose grain sits above the document structurally cannot jump; that is not
+  an omission, it is something to state.
+
+### Consistency is not realism
+
+A synthetic company dataset passed **all** 150-odd checks (consistency before load,
+reconciliation after) and was still unbelievable as enterprise data, because **every check was
+internal** — document against posting, total against total, grain against grain. Nothing compared
+against an external anchor. What slipped through with green checks: revenue per employee of
+€1.3 M against an industry band of 0.2–0.35; a personnel-cost ratio of 4.6 % instead of 22–32 %;
+**currency-blind standard prices** (the same material at 76 EUR, 77 CHF, 75 MXN — every
+document balances, so nothing turns red, but one company booked €164 M of price variance on
+€6.9 M of revenue); 41 % of foreign-currency lines never converted. **Every synthetic or migrated
+dataset needs a second kind of check: industry KPI bands** — revenue per head, material ratio,
+personnel-cost ratio, inventory turns, asset intensity, payment terms. They find in minutes what
+consistency checks never will. The revealing sentence comes *before* the first drill-down:
+"You make €1.2 billion with 900 people — what exactly do you manufacture?" Whoever builds demo or
+test data should be able to say that sentence before an audience does.
+
+### Read the whole panel before saying "the product can't"
+
+Two SAC table features were communicated to a client as hard limits, and an architecture
+recommendation (deviations as separate measures) was derived from them — both were wrong.
+Thresholds *can* be limited to individual column members (the filter block of the threshold
+dialog is a multi-select over the members of each axis), and number scaling *does* exist — several
+screen heights below the fold of the Format panel, scoped to a region rather than a row. And a
+validation-rule option that two review rounds had removed as "invented" turned out to exist
+verbatim in the help. The rule for a knowledge base: adding a precise claim (an option name, a
+menu path, an enum) needs evidence — and **removing one needs the same evidence**. A "not found"
+from a search endpoint or a plain fetch of a single-page-app documentation site is not a refutation.

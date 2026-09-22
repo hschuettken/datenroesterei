@@ -12,7 +12,8 @@
 **Modeling & planning logic** — §1 model fundamentals · §2 data actions · §3 embedded steps ·
 §4 copy / cross-model copy / conversion · §5 advanced formulas · §6 allocations ·
 §7 multi actions · §8 performance · §9 pitfalls · §10 classic → new model type ·
-§11 production example · §12 field-tested gotchas · §13 authoring a data action end to end
+§11 production example · §12 field-tested gotchas · §12a asymmetric reporting ·
+§13 authoring a data action end to end
 
 **Companion files** — **`SAC_APIS.md`** (OAuth, Data Import/Export, Content Network, SCIM, InA,
 the internal REST layer, import-job automation) · **`SAC_SCRIPTING.md`** (story and
@@ -761,6 +762,25 @@ depend on a specific customer setup.
 - **The story designer and the data-action editor cache the definition from the moment they were
   opened.** After any change made outside the editor, reload the tab — and be aware that a save
   from the stale tab **overwrites** the outside change.
+- **Two table features that get declared "impossible" and are not.** A **threshold** is measure
+  + ranges + *filter*: the filter block of the dialog is pre-filled with the coordinates of the
+  clicked cell, and each line is a multi-select over the members of that axis — so a traffic
+  light can be limited to individual column members (e.g. only the two deviation columns). And
+  **number scaling exists** — Format panel, all the way down under *Number format*: scaling
+  (thousand / million / auto), scaling format, decimals; its scope is a *region* (data area,
+  header area, table), not a row, so a per-row scaling à la BEx cell scaling has no counterpart.
+  Zero/NULL suppression sits in the "…" menu of the Rows/Columns section header. Rule: scroll
+  the panel to the end and read the whole dialog before telling anyone "SAC can't".
+- **`#` combinations CAN be blocked in validation rules.** The option "Define unassigned
+  members manually" (Validation Rules) makes any combination with the unassigned node invalid
+  unless explicitly defined. It was removed from one knowledge base twice because a search did
+  not find it — a "not found" from a search endpoint against a single-page-app help site is not a
+  refutation. The `NOT_ASSIGNED` leaf pattern above is for *hierarchy* nodes, not for this.
+- **The data-action scripting agent** (natural-language intent as a comment → generated script)
+  is released, but in many tenants simply **not activated**, because activation hangs on the
+  tenant's AI terms — check that before any "it doesn't work" diagnosis. It generates a
+  proposal without seeing the result data; there is no test-against-the-cube loop. Treat its
+  output as a draft and verify it against the numbers yourself.
 
 ### Advanced formulas — syntax and parameter rules that are not in the reference
 
@@ -927,6 +947,60 @@ Protocol details, pagination traps and the server-side aggregation trick have mo
 ---
 
 ---
+
+## 12a. Asymmetric Reporting (QRC Q2 2026) — what it is and where it stops
+
+Not an object of its own but **three building blocks** that together yield a table whose
+columns each carry their own time granularity and time window — BEx-like, without cell-level
+formulas:
+
+1. **Calculation input controls in restricted measures / cross calculations** — an input
+   control (date, version, measure) drives the restriction; a *measure* input control as the base
+   measure of a restriction switches e.g. local/group currency without script.
+2. **Dynamic time filter "Rest of Period"** — next to "To Date" / "Current Period"; the cut-over
+   date comes from a *Current Date* input control: actuals up to the date, forecast after it.
+3. **Visibility filters per structure member** — Builder → structure dimension (Account,
+   Measures or a cross calculation) → *Set Data Visibility per Member* → per member the visible
+   hierarchy levels and totals of the inner dimension.
+
+The typical rolling-forecast layout: columns = a measure structure (Actuals, ROY Forecast, FY
+Budget, FY AC+FC, Delta) with time as the inner dimension; Actuals/Forecast at month level,
+Budget at year + quarter, AC+FC at year, and
+`FY AC+FC = [ActualsBOY] + [Forecast ROY] | INVERSE([Forecast ROY] := [FYStory] - [ActualsBOY])`
+so the yearly column stays input-enabled.
+
+**Rules and limits (documented):** optimized story / New Table Build Experience only. Visibility
+filters are **display filters, not data filters** — aggregation is unchanged. **Not available
+with SAP BW live** (visibility filters on hierarchies); HANA live needs HANA 2.0 SPS07 rev
+79.09+ or HANA Cloud 2026.2+. Configure either one structure dimension *or* the inner
+dimensions of an axis, not both. "Hide irrelevant members" (default on, effective only after a
+visibility filter is set) hides inner members that are empty in the structure member's context.
+Blending: inner dimensions of the primary model only. No nested dynamic time restrictions —
+build separate restrictions.
+
+**Findings from practice (field observations, not documented behaviour):**
+
+- **Data entry works** — into restricted measures directly, into calculated measures only with
+  `INVERSE`.
+- **Only one Current-Date input control per story**, so two forecast cuts with different
+  cut-over dates cannot be compared side by side.
+- The year in the month header ("Jan (2026)") cannot be hidden with a native SAC time
+  dimension; on a Datasphere live model it can, via the date dimension's text association.
+- **Fiscal year:** users report it working correctly only with calendar year — test on fiscal
+  models before promising it.
+- The date dimension must sit *inside* the structure on the column axis; date above the
+  measures disables the feature.
+- Version-driven windows: `FIND()` over version attributes (cut-over taken from the version)
+  works in forecast layouts and forecast calculations, **not in restricted measures**; no
+  script API for the custom current date was found. A "start year lives on the version"
+  pattern therefore ends up as calculation input controls on the restricted measures, set by
+  script.
+- Performance: the pattern forces many restricted/calculated measures where one measure plus
+  version and an advanced filter used to do; at high volumes the intermediate calculations
+  are expensive. Cell-level row×column formulas as in BEx remain impossible.
+
+**Before committing to it in a project, check:** data source (BW is out), fiscal time, number of
+measures × volume, and whether several cut-over states have to be compared.
 
 ## 13. Authoring a Data Action End to End
 
@@ -1112,6 +1186,9 @@ Primary (SAP Help, verified current at Q2 2026 / 2026.8):
 - Optimize Advanced Formulas for Better Performance — `fa558b0ff273475c8f3cfa0053a5d89e`
 - Automate a Planning and Predictive Workflow Using Multi Actions — `b1a98c566bc64ce78871ee3c0b559d6f`
 - Learn About Planning Model Data — `bc9f0eb2da1848dd9d3925ec29337e9f`
+- Configure Data Visibility in Tables (New Table Build Experience) — `b2d6dd66647c4555b939e0934b6400e6`
+  (2026.15); SAP Community blog "Asymmetric reporting layout" (May 2026) incl. its comment thread
+- Validation rules — "Define unassigned members manually" — `e275adffd7f14151a97721d83f4a865c` (Q3 2026)
 - SAP KBA 3658925 (AF performance), KBA 3707921 (account models not deprecated),
   KBA 2936022 (Keep Source ignored when # is in targets), KBA 2840982 (#-as-source not
   recognized, 2019.15)
