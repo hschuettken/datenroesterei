@@ -1,7 +1,7 @@
 # Datenrösterei
 
 Notes and tools from productive SAP data-platform work — **SAP Datasphere**, **SAP Analytics
-Cloud planning**, and **ABAP** — published because the things that cost the most time are rarely
+Cloud planning**, **SAP BW** and **ABAP** — published because the things that cost the most time are rarely
 the things that are documented.
 
 *Rösterei — a roastery. Raw beans are not a drink and raw tables are not a model; both need
@@ -58,6 +58,16 @@ server. Built for tables in the billion-row class (ACDOCA and similar):
 
 The three design decisions behind it are written up in
 [Exporting billion-row tables from ABAP](https://layer8.schuettken.net/exporting-billion-row-tables-from-abap/).
+
+### [`bw-field-notes/`](bw-field-notes/) — classic BW and BW/4HANA, ~800 lines
+
+Three documents on the ABAP side of the platform: the tables that tell you what a load actually
+did (`RSBKREQUEST` / `RSPMREQUEST` and the rule of three: read → transferred → activated), the
+suffix rules of generated tables, routine mechanics (`STATICS`, the global block, compounded
+fields), the *overwrite vs. summation* defect that stays invisible until a source maps many rows
+onto one key, activation-queue diagnosis, measurement rules for financial data, and the current
+BW → Datasphere → Databricks paths. Plus ten symptom → cause → recipe entries for transformation
+routines, and a reference for activating 2LIS extractors on the ERP side.
 
 ### [`sac-hierarchy-api/`](sac-hierarchy-api/) — hierarchies without the Modeler
 
