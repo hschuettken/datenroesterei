@@ -59,7 +59,7 @@ server. Built for tables in the billion-row class (ACDOCA and similar):
 The three design decisions behind it are written up in
 [Exporting billion-row tables from ABAP](https://layer8.schuettken.net/exporting-billion-row-tables-from-abap/).
 
-### [`bw-field-notes/`](bw-field-notes/) — classic BW and BW/4HANA, ~800 lines
+### [`bw-field-notes/`](bw-field-notes/) — classic BW and BW/4HANA, ~970 lines
 
 Three documents on the ABAP side of the platform: the tables that tell you what a load actually
 did (`RSBKREQUEST` / `RSPMREQUEST` and the rule of three: read → transferred → activated), the
